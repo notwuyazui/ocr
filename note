@@ -1,0 +1,5 @@
+检测文字所在位置CTPN；识别文本区域内容CRNN。
+CTPN：Connectionist Text Proposal Network
+    文本检测本质上属于物体检测（masked-RCNN）
+    VGG提取特征，BLSTM融入上下文信息，基于RPN完成检测。
+CRNN：Convolutional Recurrent Neural Network，一种用于文本识别的卷积循环神经网络，可以识别出文本行中的字符。
