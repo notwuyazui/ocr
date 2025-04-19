@@ -1,9 +1,3 @@
-#-*- coding:utf-8 -*-
-#'''
-# Created on 18-12-11 上午10:01
-#
-# @Author: Greg Gao(laygin)
-#'''
 import os
 import torch
 import torch.nn as nn

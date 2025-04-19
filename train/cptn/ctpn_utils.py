@@ -41,7 +41,7 @@ def resize(image, width=None, height=None, inter=cv2.INTER_AREA):
     return resized
 
 
-def gen_anchor(featuresize, scale):
+def gen_anchor(featuresize, scale): #scale=16
     """
         gen base anchor from feature map [HXW][9][4]
         reshape  [HXW][9][4] to [HXWX9][4]
@@ -49,34 +49,41 @@ def gen_anchor(featuresize, scale):
     heights = [11, 16, 23, 33, 48, 68, 97, 139, 198, 283]
     widths = [16, 16, 16, 16, 16, 16, 16, 16, 16, 16]
 
-    # gen k=9 anchor size (h,w)
     heights = np.array(heights).reshape(len(heights), 1)
     widths = np.array(widths).reshape(len(widths), 1)
+    #after reshape, size:10*1
 
-    base_anchor = np.array([0, 0, 15, 15])
-    # center x,y
-    xt = (base_anchor[0] + base_anchor[2]) * 0.5
+    base_anchor = np.array([0, 0, 15, 15])  #基础框
+    # 计算中心点
+    xt = (base_anchor[0] + base_anchor[2]) * 0.5    
     yt = (base_anchor[1] + base_anchor[3]) * 0.5
 
-    # x1 y1 x2 y2
+    #还原出x1 y1 x2 y2（size：10*1）
     x1 = xt - widths * 0.5
     y1 = yt - heights * 0.5
     x2 = xt + widths * 0.5
     y2 = yt + heights * 0.5
-    base_anchor = np.hstack((x1, y1, x2, y2))
+    #base_anchor:10个框的左上角和右下角的坐标
+    base_anchor = np.hstack((x1, y1, x2, y2))       #按水平叠放成一个数组，size：10*4*1
 
-    h, w = featuresize
-    shift_x = np.arange(0, w) * scale
+    h, w = featuresize  #56，100
+    shift_x = np.arange(0, w) * scale   #一个点相当于16个点，还原成原始图像坐标
     shift_y = np.arange(0, h) * scale
+    #x:[0 16 32 ... 1584],y:[0 16 32 ... 896]
+    
     # apply shift
     anchor = []
     for i in shift_y:
         for j in shift_x:
             anchor.append(base_anchor + [j, i, j, i])
+    #anchor里面5600个array，每个array是1*10*4十个框，每个框四个坐标点
+    #np.array(anchor)的shape:[5600, 10, 4]
     return np.array(anchor).reshape((-1, 4))
+    #返回56000*4,56000个框，每个框的四个坐标
 
 
-def cal_iou(box1, box1_area , boxes2, boxes2_area):
+def cal_iou(box1, box1_area , boxes2, boxes2_area): #输入boxes1和boxes2两个点的四个坐标值，以及对应的面积大小
+                                                    #输出两个box的IoU值（重叠面积/并集面积）
     """
     box1 [x1,y1,x2,y2]
     boxes2 [Msample,x1,y1,x2,y2]
@@ -91,22 +98,25 @@ def cal_iou(box1, box1_area , boxes2, boxes2_area):
     return iou
 
 
-def cal_overlaps(boxes1, boxes2):
+def cal_overlaps(boxes1, boxes2):   #输出N*M的矩阵，每个box1与每个box2的IoU值
     """
-    boxes1 [Nsample,x1,y1,x2,y2]  anchor
-    boxes2 [Msample,x1,y1,x2,y2]  grouth-box
+    boxes1 [Nsample,x1,y1,x2,y2]  N*4 anchor
+    boxes2 [Msample,x1,y1,x2,y2]  M*4 grouth-box
 
     """
+    #两个box的面积
     area1 = (boxes1[:, 0] - boxes1[:, 2]) * (boxes1[:, 1] - boxes1[:, 3])
     area2 = (boxes2[:, 0] - boxes2[:, 2]) * (boxes2[:, 1] - boxes2[:, 3])
 
+    #overlaps:N*M
     overlaps = np.zeros((boxes1.shape[0], boxes2.shape[0]))
 
-    # calculate the intersection of  boxes1(anchor) and boxes2(GT box)
     for i in range(boxes1.shape[0]):
+        #对boxes1中的每一个框，计算其与boxes2中所有框的IoU值
         overlaps[i][:] = cal_iou(boxes1[i], area1[i], boxes2, area2)
 
     return overlaps
+    #输出N*M的矩阵，N个anchor，M个ground-box，每个anchor与每个ground-box的IoU值
 
 
 def bbox_transfrom(anchors, gtboxes):
@@ -170,34 +180,36 @@ def filter_bbox(bbox, minsize):
     return keep
 
 
-def cal_rpn(imgsize, featuresize, scale, gtboxes):
+def cal_rpn(imgsize, featuresize, scale, gtboxes):  
+    #gtbox：Ground Truth Box真实框
     imgh, imgw = imgsize
 
-    # gen base anchor
+    # base_anchor的shape：56000*4，获取了56000个anchor，每个框的左上角右下角共四个坐标数据
     base_anchor = gen_anchor(featuresize, scale)
 
-    # calculate iou
+    # overlaps:56000*200，overlaps[i][j]表示第i个anchor与第j个ground-box的IoU值
     overlaps = cal_overlaps(base_anchor, gtboxes)
 
-    # init labels -1 don't care  0 is negative  1 is positive
+    # 构建（初始化的）候选框标签，-1表示不关心，0表示负样本，1表示正样本
     labels = np.empty(base_anchor.shape[0])
-    labels.fill(-1)
+    labels.fill(-1) #所有数字填充为-1
 
-    # for each GT box corresponds to an anchor which has highest IOU
+    # 对每个真实框，取与他IoU最大的anchor的下标
     gt_argmax_overlaps = overlaps.argmax(axis=0)
-
-    # the anchor with the highest IOU overlap with a GT box
+    
+    # 对每个anchor，取与他IoU最大的真实框的下标
     anchor_argmax_overlaps = overlaps.argmax(axis=1)
+    # 每个anchor的最大的overlaps值
     anchor_max_overlaps = overlaps[range(overlaps.shape[0]), anchor_argmax_overlaps]
 
-    # IOU > IOU_POSITIVE
+    # IOU > IOU_POSITIVE 记为正样本
     labels[anchor_max_overlaps > IOU_POSITIVE] = 1
-    # IOU <IOU_NEGATIVE
+    # IOU <IOU_NEGATIVE  记为负样本
     labels[anchor_max_overlaps < IOU_NEGATIVE] = 0
-    # ensure that every GT box has at least one positive RPN region
+    # 确保每一个ground-box至少有一个anchor被标记为正样本
     labels[gt_argmax_overlaps] = 1
 
-    # only keep anchors inside the image
+    # 有些候选框越界（超过原图的边框），将其标签设为-1
     outside_anchor = np.where(
         (base_anchor[:, 0] < 0) |
         (base_anchor[:, 1] < 0) |
@@ -206,7 +218,7 @@ def cal_rpn(imgsize, featuresize, scale, gtboxes):
     )[0]
     labels[outside_anchor] = -1
 
-    # subsample positive labels ,if greater than RPN_POSITIVE_NUM(default 128)
+    # 如果正样本个数大于RPN_POSITIVE_NUM，随机选择RPN_POSITIVE_NUM个正样本
     fg_index = np.where(labels == 1)[0]
     # print(len(fg_index))
     if (len(fg_index) > RPN_POSITIVE_NUM):
@@ -220,12 +232,12 @@ def cal_rpn(imgsize, featuresize, scale, gtboxes):
             # print('bgindex:',len(bg_index),'num_bg',num_bg)
             labels[np.random.choice(bg_index, len(bg_index) - num_bg, replace=False)] = -1
 
-    # calculate bbox targets
-    # debug here
+    # 微调候选框（bounding box），计算每个候选框的偏移量
     bbox_targets = bbox_transfrom(base_anchor, gtboxes[anchor_argmax_overlaps, :])
     # bbox_targets=[]
     # print(len(labels),len(bbox_targets),len(base_anchor),base_anchor[0],labels[0])
 
+    # 返回[每个候选框的标签，每个候选框的偏移量], 每个候选框的坐标
     return [labels, bbox_targets], base_anchor
 
 

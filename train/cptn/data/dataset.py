@@ -36,7 +36,7 @@ def readxml(path):
 
 
 # for ctpn text detection
-class VOCDataset(Dataset):
+class VOCDataset(Dataset):      #没用上啊
     def __init__(self,
                  datadir,
                  labelsdir):
@@ -188,7 +188,7 @@ class CH4Dataset(Dataset):
             img = cv2.imread(img_path)
 
         #####for read error, use default image#####
-
+        #resize
         h, w, c = img.shape
         rescale_fac = max(h, w) / 1600
         if rescale_fac>1.0:
@@ -207,6 +207,7 @@ class CH4Dataset(Dataset):
             gtbox[:, 0] = newx1
             gtbox[:, 2] = newx2
 
+        #[每个候选框的标签，每个候选框的偏移量], 每个候选框的坐标
         [cls, regr], base_anchors = cal_rpn((h, w), (int(h / 16), int(w / 16)), 16, gtbox)
         # debug_img = self.draw_boxes(img.copy(),cls,base_anchors,gtbox)
         # cv2.imwrite('debug/{}'.format(img_name),debug_img)
@@ -216,7 +217,7 @@ class CH4Dataset(Dataset):
 
         cls = np.expand_dims(cls, axis=0)
 
-        # transform to torch tensor
+        # 转换为torch tensor格式
         m_img = torch.from_numpy(m_img.transpose([2, 0, 1])).float()
         cls = torch.from_numpy(cls).float()
         regr = torch.from_numpy(regr).float()
